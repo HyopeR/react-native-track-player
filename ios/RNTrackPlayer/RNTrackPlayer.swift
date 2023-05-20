@@ -26,6 +26,7 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
         super.init()
 
         audioSessionController.delegate = self
+        player.event.playbackEnd.addListener(self, handleAudioPlayerPlaybackEnded)
         player.event.receiveMetadata.addListener(self, handleAudioPlayerMetadataReceived)
         player.event.stateChange.addListener(self, handleAudioPlayerStateChange)
         player.event.fail.addListener(self, handleAudioPlayerFailed)
@@ -330,10 +331,6 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
             return
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            UIApplication.shared.beginReceivingRemoteControlEvents();
-        }
-
         var tracks = [Track]()
         for trackDict in trackDicts {
             guard let track = Track(dictionary: trackDict) else {
@@ -472,12 +469,7 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
 
         player.stop()
         player.clear()
-        player.nowPlayingInfoController.clear()
-        try? AVAudioSession.sharedInstance().setActive(false)
         resolve(NSNull())
-        DispatchQueue.main.async {
-            UIApplication.shared.endReceivingRemoteControlEvents();
-        }
     }
 
     @objc(play:rejecter:)
@@ -787,6 +779,11 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
         sendEvent(withName: "playback-error", body: ["error": error?.localizedDescription])
     }
 
+    func handleAudioPlayerPlaybackEnded(reason: PlaybackEndedReason) {
+        let queueEndReached = reason == PlaybackEndedReason.cleared
+        if queueEndReached {}
+    }
+
     func handleAudioPlayerQueueIndexChange(
         item: AudioItem?,
         index: Int?,
@@ -794,21 +791,25 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
         lastIndex: Int?,
         lastPosition: Double?
     ) {
+        if let item = item {
+            DispatchQueue.main.async {
+                UIApplication.shared.beginReceivingRemoteControlEvents();
+            }
+            // Update now playing controller with isLiveStream option from track
+            if self.player.automaticallyUpdateNowPlayingInfo {
+                let isTrackLiveStream = (item as? Track)?.isLiveStream ?? false
+                self.player.nowPlayingInfoController.set(keyValue: NowPlayingInfoProperty.isLiveStream(isTrackLiveStream))
+            }
+        } else {
+            DispatchQueue.main.async {
+                UIApplication.shared.endReceivingRemoteControlEvents();
+            }
+        }
+
         var dictionary: [String: Any] = ["position": lastPosition ?? 0]
 
         if let lastIndex = lastIndex { dictionary["lastIndex"] = lastIndex }
         if let index = index { dictionary["nextTrack"] = index }
-
-        // Load isLiveStream option for track
-        var isTrackLiveStream = false
-        if let index = index, index < player.items.count {
-            let track = player.items[index]
-            isTrackLiveStream = (track as? Track)?.isLiveStream ?? false
-        }
-
-        if player.automaticallyUpdateNowPlayingInfo {
-            player.nowPlayingInfoController.set(keyValue: NowPlayingInfoProperty.isLiveStream(isTrackLiveStream))
-        }
 
         sendEvent(withName: "playback-track-changed", body: dictionary)
 
