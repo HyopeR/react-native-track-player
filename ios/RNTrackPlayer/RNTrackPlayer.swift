@@ -26,10 +26,11 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
         super.init()
 
         audioSessionController.delegate = self
+        player.event.playbackEnd.addListener(self, handleAudioPlayerPlaybackEnded)
         player.event.receiveMetadata.addListener(self, handleAudioPlayerMetadataReceived)
         player.event.stateChange.addListener(self, handleAudioPlayerStateChange)
         player.event.fail.addListener(self, handleAudioPlayerFailed)
-        player.event.queueIndex.addListener(self, handleAudioPlayerQueueIndexChange)
+        player.event.currentItem.addListener(self, handleAudioPlayerQueueIndexChange)
         player.event.secondElapse.addListener(self, handleAudioPlayerSecondElapse)
     }
 
@@ -53,6 +54,7 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
             "STATE_STOPPED": State.stopped.rawValue,
             "STATE_BUFFERING": State.buffering.rawValue,
             "STATE_CONNECTING": State.connecting.rawValue,
+            "STATE_ERROR": State.error.rawValue,
 
             "TRACK_PLAYBACK_ENDED_REASON_END": PlaybackEndedReason.playedUntilEnd.rawValue,
             "TRACK_PLAYBACK_ENDED_REASON_JUMPED": PlaybackEndedReason.jumpedToIndex.rawValue,
@@ -329,10 +331,6 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
             return
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            UIApplication.shared.beginReceivingRemoteControlEvents();
-        }
-
         var tracks = [Track]()
         for trackDict in trackDicts {
             guard let track = Track(dictionary: trackDict) else {
@@ -470,11 +468,8 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
         }
 
         player.stop()
-        player.nowPlayingInfoController.clear()
+        player.clear()
         resolve(NSNull())
-        DispatchQueue.main.async {
-            UIApplication.shared.endReceivingRemoteControlEvents();
-        }
     }
 
     @objc(play:rejecter:)
@@ -654,11 +649,10 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
     @objc(getState:rejecter:)
     public func getState(resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {
         if !hasInitialized {
-            reject("player_not_initialized", "The player is not initialized. Call setupPlayer first.", nil)
-            return
+            resolve(State.fromPlayerState(state: .idle).rawValue)
+        } else {
+            resolve(State.fromPlayerState(state: player.playerState).rawValue)
         }
-
-        resolve(State.fromPlayerState(state: player.playerState).rawValue)
     }
 
     @objc(updateMetadataForTrack:metadata:resolver:rejecter:)
@@ -785,26 +779,41 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
         sendEvent(withName: "playback-error", body: ["error": error?.localizedDescription])
     }
 
-    func handleAudioPlayerQueueIndexChange(previousIndex: Int?, nextIndex: Int?) {
-        var dictionary: [String: Any] = [ "position": player.currentTime ]
+    func handleAudioPlayerPlaybackEnded(reason: PlaybackEndedReason) {
+        let queueEndReached = reason == PlaybackEndedReason.cleared
+        if queueEndReached {}
+    }
 
-        if let previousIndex = previousIndex { dictionary["track"] = previousIndex }
-        if let nextIndex = nextIndex { dictionary["nextTrack"] = nextIndex }
-
-        // Load isLiveStream option for track
-        var isTrackLiveStream = false
-        if let nextIndex = nextIndex, nextIndex < player.items.count {
-            let track = player.items[nextIndex]
-            isTrackLiveStream = (track as? Track)?.isLiveStream ?? false
+    func handleAudioPlayerQueueIndexChange(
+        item: AudioItem?,
+        index: Int?,
+        lastItem: AudioItem?,
+        lastIndex: Int?,
+        lastPosition: Double?
+    ) {
+        if let item = item {
+            DispatchQueue.main.async {
+                UIApplication.shared.beginReceivingRemoteControlEvents();
+            }
+            // Update now playing controller with isLiveStream option from track
+            if self.player.automaticallyUpdateNowPlayingInfo {
+                let isTrackLiveStream = (item as? Track)?.isLiveStream ?? false
+                self.player.nowPlayingInfoController.set(keyValue: NowPlayingInfoProperty.isLiveStream(isTrackLiveStream))
+            }
+        } else {
+            DispatchQueue.main.async {
+                UIApplication.shared.endReceivingRemoteControlEvents();
+            }
         }
 
-        if player.automaticallyUpdateNowPlayingInfo {
-            player.nowPlayingInfoController.set(keyValue: NowPlayingInfoProperty.isLiveStream(isTrackLiveStream))
-        }
+        var dictionary: [String: Any] = ["position": lastPosition ?? 0]
+
+        if let lastIndex = lastIndex { dictionary["lastIndex"] = lastIndex }
+        if let index = index { dictionary["nextTrack"] = index }
 
         sendEvent(withName: "playback-track-changed", body: dictionary)
 
-        self.handleQueueEnded(previousIndex: previousIndex)
+        self.handleQueueEnded(previousIndex: lastIndex)
     }
 
     func handleQueueEnded(previousIndex: Int?) {
