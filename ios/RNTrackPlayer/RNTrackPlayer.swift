@@ -495,6 +495,17 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
         resolve(NSNull())
     }
 
+    @objc(stop:rejecter:)
+    public func stop(resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {
+        if !hasInitialized {
+            reject("player_not_initialized", "The player is not initialized. Call setupPlayer first.", nil)
+            return
+        }
+
+        player.stop()
+        resolve(NSNull())
+    }
+
     @objc(seekTo:resolver:rejecter:)
     public func seek(to time: Double, resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {
         if !hasInitialized {
