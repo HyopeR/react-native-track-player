@@ -392,6 +392,14 @@ class MusicModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
     }
 
     @ReactMethod
+    fun stop(callback: Promise) = scope.launch {
+        if (verifyServiceBoundOrReject(callback)) return@launch
+
+        musicService.stop()
+        callback.resolve(null)
+    }
+
+    @ReactMethod
     fun seekTo(seconds: Float, callback: Promise) = scope.launch {
         if (verifyServiceBoundOrReject(callback)) return@launch
 
