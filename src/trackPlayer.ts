@@ -216,6 +216,13 @@ async function pause(): Promise<void> {
 }
 
 /**
+ * Stop playback.
+ */
+async function stop(): Promise<void> {
+  return TrackPlayer.stop();
+}
+
+/**
  * Seeks to a specified time position in the current track.
  */
 async function seekTo(position: number): Promise<void> {
@@ -340,6 +347,7 @@ export default {
   reset,
   play,
   pause,
+  stop,
   seekTo,
   setVolume,
   setRate,
